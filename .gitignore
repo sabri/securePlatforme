@@ -1,0 +1,25 @@
+# .NET
+bin/
+obj/
+*.db
+*.db-shm
+*.db-wal
+*.user
+*.suo
+.vs/
+appsettings.Development.json
+
+# Node / React
+client/node_modules/
+client/dist/
+client/.env
+
+# IDE
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
