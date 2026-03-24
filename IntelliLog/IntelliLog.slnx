@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/IntelliLog.API/IntelliLog.API.csproj" />
+    <Project Path="src/IntelliLog.Application/IntelliLog.Application.csproj" />
+    <Project Path="src/IntelliLog.Domain/IntelliLog.Domain.csproj" />
+    <Project Path="src/IntelliLog.Infrastructure/IntelliLog.Infrastructure.csproj" />
+  </Folder>
+</Solution>

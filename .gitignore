@@ -13,6 +13,9 @@ appsettings.Development.json
 client/node_modules/
 client/dist/
 client/.env
+IntelliLog/client/node_modules/
+IntelliLog/client/dist/
+IntelliLog/client/.env
 
 # IDE
 .idea/

@@ -1,0 +1,6 @@
+@IntelliLog.API_HostAddress = http://localhost:5030
+
+GET {{IntelliLog.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
