@@ -12,6 +12,14 @@ using SecurePlatform.Infrastructure.Data;
 
 namespace SecurePlatform.Infrastructure.Services;
 
+// ═══════════════════════════════════════════════════════════════
+// [SECURITY: SQL INJECTION] — This service uses Entity Framework
+// Core exclusively for database access. EF Core always generates
+// parameterized queries, so user input (email, passwords, tokens)
+// is never concatenated into raw SQL — structurally preventing
+// SQL injection attacks.
+// ═══════════════════════════════════════════════════════════════
+
 /// <summary>
 /// Full authentication service implementation.
 /// Handles Register, Login, Refresh Token, Logout.
@@ -20,17 +28,23 @@ public class AuthService : IAuthService
 {
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ITokenService _tokenService;
+    private readonly ITokenRevocationService _tokenRevocationService;
+    private readonly IEmailService _emailService;
     private readonly ApplicationDbContext _dbContext;
     private readonly JwtSettings _jwtSettings;
 
     public AuthService(
         UserManager<ApplicationUser> userManager,
         ITokenService tokenService,
+        ITokenRevocationService tokenRevocationService,
+        IEmailService emailService,
         ApplicationDbContext dbContext,
         IOptions<JwtSettings> jwtSettings)
     {
         _userManager = userManager;
         _tokenService = tokenService;
+        _tokenRevocationService = tokenRevocationService;
+        _emailService = emailService;
         _dbContext = dbContext;
         _jwtSettings = jwtSettings.Value;
     }
@@ -135,9 +149,16 @@ public class AuthService : IAuthService
             MapToUserDto(user, roles));
     }
 
-    public async Task<bool> LogoutAsync(string userId)
+    public async Task<bool> LogoutAsync(string userId, string? accessTokenJti = null)
     {
-        // Revoke ALL active refresh tokens for the user (secure logout)
+        // 1. Revoke the current access token in Redis so it's rejected immediately
+        if (!string.IsNullOrEmpty(accessTokenJti))
+        {
+            var remainingLifetime = TimeSpan.FromMinutes(_jwtSettings.AccessTokenExpirationMinutes);
+            await _tokenRevocationService.RevokeTokenAsync(accessTokenJti, remainingLifetime);
+        }
+
+        // 2. Revoke ALL active refresh tokens for the user (secure logout)
         var activeTokens = await _dbContext.RefreshTokens
             .Where(rt => rt.UserId == userId && rt.RevokedAt == null && rt.ExpiresAt > DateTime.UtcNow)
             .ToListAsync();
@@ -159,6 +180,92 @@ public class AuthService : IAuthService
 
         var roles = await _userManager.GetRolesAsync(user);
         return MapToUserDto(user, roles);
+    }
+
+    // ═══════════════════════════════════════════════
+    // Password Reset
+    // ═══════════════════════════════════════════════
+
+    public async Task<AuthResponse> ForgotPasswordAsync(ForgotPasswordRequest request)
+    {
+        var user = await _userManager.FindByEmailAsync(request.Email);
+        if (user == null)
+        {
+            // Don't reveal whether the email exists — always return success message
+            return AuthResponse.Failure(AuthResultType.PasswordResetCodeSent,
+                "If that email is registered, a reset code has been sent.");
+        }
+
+        // Generate a 6-digit code using Identity's token provider
+        var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+
+        // Send the code via email (DevEmailService logs to console in dev)
+        await _emailService.SendPasswordResetCodeAsync(user.Email!, token);
+
+        return AuthResponse.Failure(AuthResultType.PasswordResetCodeSent,
+            "If that email is registered, a reset code has been sent.");
+    }
+
+    public async Task<AuthResponse> ResetPasswordAsync(ResetPasswordRequest request)
+    {
+        if (request.NewPassword != request.ConfirmPassword)
+            return AuthResponse.Failure(AuthResultType.PasswordResetFailed, "Passwords do not match.");
+
+        var user = await _userManager.FindByEmailAsync(request.Email);
+        if (user == null)
+            return AuthResponse.Failure(AuthResultType.PasswordResetFailed, "Invalid reset request.");
+
+        var result = await _userManager.ResetPasswordAsync(user, request.Code, request.NewPassword);
+        if (!result.Succeeded)
+        {
+            var errors = string.Join("; ", result.Errors.Select(e => e.Description));
+            return AuthResponse.Failure(AuthResultType.PasswordResetFailed, errors);
+        }
+
+        return AuthResponse.Failure(AuthResultType.PasswordResetSuccess,
+            "Password has been reset successfully. You can now login.");
+    }
+
+    // ═══════════════════════════════════════════════
+    // OAuth External Login
+    // ═══════════════════════════════════════════════
+
+    public async Task<AuthResponse> ExternalLoginAsync(string provider, string email, string firstName, string lastName)
+    {
+        // 1. Check if user already exists
+        var user = await _userManager.FindByEmailAsync(email);
+
+        if (user == null)
+        {
+            // 2. Auto-register new users from OAuth
+            user = new ApplicationUser
+            {
+                Email = email,
+                UserName = email,
+                FirstName = firstName,
+                LastName = lastName,
+                EmailConfirmed = true // OAuth emails are pre-verified
+            };
+
+            var createResult = await _userManager.CreateAsync(user);
+            if (!createResult.Succeeded)
+            {
+                var errors = string.Join("; ", createResult.Errors.Select(e => e.Description));
+                return AuthResponse.Failure(AuthResultType.RegistrationFailed, errors);
+            }
+
+            await _userManager.AddToRoleAsync(user, "User");
+        }
+
+        if (!user.IsActive)
+            return AuthResponse.Failure(AuthResultType.UserLocked, "Account is deactivated.");
+
+        // 3. Update last login
+        user.LastLoginAt = DateTime.UtcNow;
+        await _userManager.UpdateAsync(user);
+
+        // 4. Generate JWT tokens (same as normal login)
+        return await GenerateAuthResponseAsync(user);
     }
 
     // ═══════════════════════════════════════════════

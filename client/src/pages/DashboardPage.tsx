@@ -34,6 +34,7 @@ export default function DashboardPage() {
       <nav style={styles.nav}>
         <h2 style={{ margin: 0 }}>🛡️ SecurePlatform</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <a href="http://localhost:5174" style={styles.intelliLogLink}>📊 IntelliLog</a>
           <span>Welcome, <strong>{user?.firstName} {user?.lastName}</strong></span>
           <span style={styles.badge}>{user?.roles?.join(', ')}</span>
           <button onClick={handleLogout} style={styles.logoutBtn}>Logout</button>
@@ -54,18 +55,27 @@ export default function DashboardPage() {
           </table>
         </div>
 
-        {/* JWT Info Card */}
+        {/* ═══════════════════════════════════════════════════════
+            [SECURITY: HTTP-ONLY COOKIES] — JWT tokens are stored
+            in HTTP-only cookies, invisible to JavaScript. Unlike
+            localStorage, XSS cannot steal them. The browser sends
+            them automatically on every same-origin request.
+            ═══════════════════════════════════════════════════════ */}
         <div style={styles.card}>
-          <h3>🔑 JWT Token Info</h3>
+          <h3>🔑 Security Info</h3>
           <p style={{ fontSize: '0.85rem', color: '#666' }}>
-            Your access token is stored in <code>localStorage</code>. It's automatically
-            attached to every API request via an Axios interceptor.
-            When it expires, the refresh token is used to get a new one silently.
+            Your session is secured with <strong>HTTP-only cookies</strong>. Tokens are
+            never stored in localStorage or accessible to JavaScript — eliminating
+            XSS-based token theft. CSRF protection, rate limiting, and security
+            headers are all active.
           </p>
-          <details>
-            <summary style={{ cursor: 'pointer', color: '#4f46e5' }}>View Access Token</summary>
-            <pre style={styles.pre}>{localStorage.getItem('accessToken')}</pre>
-          </details>
+          <ul style={{ fontSize: '0.85rem', color: '#666', margin: '0.5rem 0', paddingLeft: '1.2rem' }}>
+            <li>✅ HTTP-only Secure cookies (XSS protection)</li>
+            <li>✅ CSRF token validation on every mutation</li>
+            <li>✅ Rate limiting on auth & AI endpoints</li>
+            <li>✅ Security headers (CSP, X-Frame-Options, etc.)</li>
+            <li>✅ BFF pattern — API hidden from browser</li>
+          </ul>
         </div>
 
         {/* AI Playground Card */}
@@ -110,6 +120,10 @@ const styles: Record<string, React.CSSProperties> = {
   logoutBtn: {
     background: '#ef4444', color: 'white', border: 'none',
     padding: '0.5rem 1rem', borderRadius: '8px', cursor: 'pointer',
+  },
+  intelliLogLink: {
+    background: '#4f46e5', color: 'white', padding: '0.5rem 1rem',
+    borderRadius: '8px', textDecoration: 'none', fontWeight: 600, fontSize: '0.9rem',
   },
   main: { maxWidth: '800px', margin: '2rem auto', padding: '0 1rem' },
   card: {

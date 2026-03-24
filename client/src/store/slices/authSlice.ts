@@ -17,6 +17,14 @@ const initialState: AuthState = {
   error: null,
 };
 
+// ═══════════════════════════════════════════════════════════════
+// [SECURITY: HTTP-ONLY COOKIES + BFF] — All auth state is derived
+// from server-side cookies, NOT localStorage. The initAuth thunk
+// calls GET /api/auth/me — if the HTTP-only cookie is valid, the
+// server returns the user profile. No tokens are ever stored or
+// read by JavaScript.
+// ═══════════════════════════════════════════════════════════════
+
 // ─── Async Thunks (side effects) ────────────────────────────
 // These are the Redux Toolkit way to handle async logic.
 // Each thunk auto-generates .pending / .fulfilled / .rejected actions.
@@ -24,14 +32,15 @@ const initialState: AuthState = {
 export const initAuth = createAsyncThunk(
   'auth/init',
   async (_, { rejectWithValue }) => {
-    const token = localStorage.getItem('accessToken');
-    if (!token) return null;
-
     try {
+      // [SECURITY: CSRF] — Fetch CSRF token cookie before first request
+      await authApi.getCsrfToken();
+
+      // [SECURITY: HTTP-ONLY COOKIES] — Browser sends AccessToken cookie
+      // automatically; no JS access to the token itself
       const res = await authApi.getMe();
       return res.data;
     } catch {
-      localStorage.clear();
       return rejectWithValue('Session expired');
     }
   }
@@ -42,9 +51,9 @@ export const loginUser = createAsyncThunk(
   async (data: LoginRequest, { rejectWithValue }) => {
     try {
       const res = await authApi.login(data);
-      if (res.data.succeeded && res.data.accessToken) {
-        localStorage.setItem('accessToken', res.data.accessToken);
-        localStorage.setItem('refreshToken', res.data.refreshToken!);
+      if (res.data.succeeded) {
+        // [SECURITY: HTTP-ONLY COOKIES] — Tokens are set in cookies
+        // by the server response; no localStorage needed
         return res.data.user!;
       }
       return rejectWithValue(res.data.message || 'Login failed');
@@ -59,9 +68,8 @@ export const registerUser = createAsyncThunk(
   async (data: RegisterRequest, { rejectWithValue }) => {
     try {
       const res = await authApi.register(data);
-      if (res.data.succeeded && res.data.accessToken) {
-        localStorage.setItem('accessToken', res.data.accessToken);
-        localStorage.setItem('refreshToken', res.data.refreshToken!);
+      if (res.data.succeeded) {
+        // [SECURITY: HTTP-ONLY COOKIES] — Tokens set via cookies by server
         return res.data.user!;
       }
       return rejectWithValue(res.data.message || 'Registration failed');
@@ -75,11 +83,12 @@ export const logoutUser = createAsyncThunk(
   'auth/logout',
   async () => {
     try {
+      // [SECURITY: HTTP-ONLY COOKIES] — Server clears the auth cookies
       await authApi.logout();
     } catch {
       // ignore — server might be unreachable
     }
-    localStorage.clear();
+    // No localStorage.clear() needed — tokens are in HTTP-only cookies
   }
 );
 

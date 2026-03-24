@@ -1,13 +1,14 @@
 import { useState, type FormEvent } from 'react';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { loginUser, clearError } from '../store/slices/authSlice';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { unwrapResult } from '@reduxjs/toolkit';
 
 export default function LoginPage() {
   const dispatch = useAppDispatch();
   const { error: reduxError } = useAppSelector((state) => state.auth);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -21,7 +22,12 @@ export default function LoginPage() {
 
     try {
       unwrapResult(await dispatch(loginUser({ email, password })));
-      navigate('/dashboard');
+      const returnUrl = searchParams.get('returnUrl');
+      if (returnUrl && returnUrl.startsWith('http://localhost:')) {
+        window.location.href = returnUrl;
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err: any) {
       setError(typeof err === 'string' ? err : reduxError || 'Login failed');
     } finally {
@@ -67,6 +73,28 @@ export default function LoginPage() {
           </button>
         </form>
 
+        <p style={styles.forgotLink}>
+          <Link to="/forgot-password">Forgot your password?</Link>
+        </p>
+
+        <div style={styles.divider}>
+          <span style={styles.dividerText}>or continue with</span>
+        </div>
+
+        {/* ═══════════════════════════════════════════════════════
+            [SECURITY: BFF PATTERN] — OAuth links point to the
+            same origin (/api/oauth/*) via the Vite proxy. The
+            backend URL is never exposed to the client.
+            ═══════════════════════════════════════════════════════ */}
+        <div style={styles.oauthRow}>
+          <a href="/api/oauth/google" style={styles.oauthButton}>
+            Google
+          </a>
+          <a href="/api/oauth/github" style={styles.oauthButtonDark}>
+            GitHub
+          </a>
+        </div>
+
         <p style={styles.link}>
           Don't have an account? <Link to="/register">Register here</Link>
         </p>
@@ -99,6 +127,25 @@ const styles: Record<string, React.CSSProperties> = {
   error: {
     background: '#fee2e2', color: '#dc2626', padding: '0.75rem',
     borderRadius: '8px', marginBottom: '1rem', textAlign: 'center' as const,
+  },
+  forgotLink: { textAlign: 'right' as const, marginTop: '0.5rem', fontSize: '0.9rem' },
+  divider: {
+    textAlign: 'center' as const, margin: '1.5rem 0',
+    borderBottom: '1px solid #ddd', lineHeight: '0.1em',
+  },
+  dividerText: {
+    background: 'white', padding: '0 0.75rem', color: '#999', fontSize: '0.85rem',
+  },
+  oauthRow: { display: 'flex', gap: '0.5rem', marginBottom: '1rem' },
+  oauthButton: {
+    flex: 1, padding: '0.75rem', textAlign: 'center' as const,
+    border: '1px solid #ddd', borderRadius: '8px', textDecoration: 'none',
+    color: '#333', fontWeight: 'bold', fontSize: '0.95rem',
+  },
+  oauthButtonDark: {
+    flex: 1, padding: '0.75rem', textAlign: 'center' as const,
+    border: 'none', borderRadius: '8px', textDecoration: 'none',
+    background: '#24292e', color: 'white', fontWeight: 'bold', fontSize: '0.95rem',
   },
   link: { textAlign: 'center' as const, marginTop: '1rem' },
 };

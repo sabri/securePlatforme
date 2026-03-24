@@ -9,6 +9,14 @@ using SecurePlatform.Application.Interfaces;
 
 namespace SecurePlatform.Infrastructure.Services;
 
+// ═══════════════════════════════════════════════════════════════
+// [SECURITY: XSS + HTTP-ONLY COOKIES] — Access tokens generated
+// here are delivered to the browser exclusively via HTTP-only
+// cookies (set in AuthController/OAuthController). They are
+// signed with HMAC-SHA256 and have short lifetimes (15 min).
+// Refresh tokens use cryptographically-secure random bytes.
+// ═══════════════════════════════════════════════════════════════
+
 /// <summary>
 /// JWT token generation & validation.
 /// Study this carefully — it's the core of how JWT works:

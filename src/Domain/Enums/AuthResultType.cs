@@ -11,5 +11,8 @@ public enum AuthResultType
     TokenInvalid,
     RegistrationFailed,
     DuplicateEmail,
+    PasswordResetFailed,
+    PasswordResetCodeSent,
+    PasswordResetSuccess,
     ServerError
 }
