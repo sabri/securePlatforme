@@ -23,13 +23,30 @@ public class RedisTokenRevocationService : ITokenRevocationService
         if (remainingLifetime <= TimeSpan.Zero)
             return; // Token already expired — nothing to revoke.
 
-        var db = _redis.GetDatabase();
-        await db.StringSetAsync($"{KeyPrefix}{jti}", "revoked", remainingLifetime);
+        try
+        {
+            var db = _redis.GetDatabase();
+            await db.StringSetAsync($"{KeyPrefix}{jti}", "revoked", remainingLifetime);
+        }
+        catch (RedisConnectionException)
+        {
+            // Redis unavailable — revocation cannot be persisted.
+            // In production, ensure Redis is running.
+        }
     }
 
     public async Task<bool> IsTokenRevokedAsync(string jti)
     {
-        var db = _redis.GetDatabase();
-        return await db.KeyExistsAsync($"{KeyPrefix}{jti}");
+        try
+        {
+            var db = _redis.GetDatabase();
+            return await db.KeyExistsAsync($"{KeyPrefix}{jti}");
+        }
+        catch (RedisConnectionException)
+        {
+            // Redis unavailable — assume token is not revoked to avoid
+            // blocking all authenticated requests when Redis is down.
+            return false;
+        }
     }
 }

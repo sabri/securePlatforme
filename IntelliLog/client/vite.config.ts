@@ -8,7 +8,7 @@ export default defineConfig({
     proxy: {
       // Auth requests → SecurePlatform API (shared JWT cookies)
       '/api/auth': {
-        target: 'https://localhost:7220',
+        target: 'http://localhost:5237',
         changeOrigin: true,
         secure: false,
       },

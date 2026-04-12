@@ -47,7 +47,7 @@ public class AuthController : ControllerBase
             new CookieOptions
             {
                 HttpOnly = false,   // JS must read this value
-                Secure = true,
+                Secure = Request.IsHttps,
                 SameSite = SameSiteMode.Strict
             });
         return Ok(new { message = "CSRF token issued." });

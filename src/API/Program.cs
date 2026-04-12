@@ -8,7 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // ─── Layer Registration (Clean Architecture) ─────────────────
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddAiServices();
+builder.Services.AddAiServices(builder.Configuration);
 builder.Services.AddHttpClient();
 
 // ─── API Services ────────────────────────────────────────────
@@ -110,10 +110,10 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = "X-XSRF-TOKEN";       // Client sends token in this header
-    options.Cookie.Name = "XSRF-TOKEN";         // Cookie name for the token
-    options.Cookie.HttpOnly = false;             // JS must read this cookie
     options.Cookie.SameSite = SameSiteMode.Strict;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+        ? CookieSecurePolicy.SameAsRequest
+        : CookieSecurePolicy.Always;
 });
 
 var app = builder.Build();
@@ -175,7 +175,7 @@ app.Use(async (context, next) =>
             new CookieOptions
             {
                 HttpOnly = false,   // JS must read this value
-                Secure = true,
+                Secure = !app.Environment.IsDevelopment(),
                 SameSite = SameSiteMode.Strict
             });
     }

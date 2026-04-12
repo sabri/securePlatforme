@@ -52,7 +52,9 @@ public static class DependencyInjection
         .AddDefaultTokenProviders();
 
         // ─── Redis ───────────────────────────────────────────────
-        var redisConnectionString = configuration.GetConnectionString("Redis") ?? "localhost:6379";
+        var redisConnectionString = configuration.GetConnectionString("Redis") ?? "localhost:6379,abortConnect=false";
+        if (!redisConnectionString.Contains("abortConnect"))
+            redisConnectionString += ",abortConnect=false";
         services.AddSingleton<IConnectionMultiplexer>(
             ConnectionMultiplexer.Connect(redisConnectionString));
 

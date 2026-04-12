@@ -40,7 +40,10 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Skip token refresh for auth endpoints to avoid infinite loops
+    const isAuthEndpoint = originalRequest.url?.includes('/auth/');
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
       originalRequest._retry = true;
 
       try {
@@ -53,8 +56,7 @@ api.interceptors.response.use(
           return api(originalRequest);
         }
       } catch {
-        // Refresh failed — redirect to login
-        window.location.href = '/login';
+        // Refresh failed — let the caller handle the rejection
       }
     }
 
