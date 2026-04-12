@@ -27,4 +27,16 @@ public class DevEmailService : IEmailService
 
         return Task.CompletedTask;
     }
+
+    public Task SendEmailConfirmationAsync(string toEmail, string confirmationToken)
+    {
+        _logger.LogWarning(
+            "═══════════════════════════════════════════\n" +
+            "  EMAIL CONFIRMATION for {Email}\n" +
+            "  Token: {Token}\n" +
+            "═══════════════════════════════════════════",
+            toEmail, confirmationToken);
+
+        return Task.CompletedTask;
+    }
 }

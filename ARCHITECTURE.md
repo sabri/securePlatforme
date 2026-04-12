@@ -273,19 +273,54 @@ Validate code → Update password → Revoke ALL refresh tokens → Force fresh 
 
 ---
 
+## 6.1 Email Confirmation (Registration)
+
+Registration now **requires email confirmation** before login is allowed.
+
+```
+POST /api/auth/register { email, password, ... }
+       │
+       ▼
+Create user (EmailConfirmed = false) → Generate confirmation token via Identity
+       │
+       ▼
+Send confirmation email (SMTP or console in dev)
+       │
+       ▼
+User receives token in email
+       │
+       ▼
+POST /api/auth/confirm-email { email, token }
+       │
+       ▼
+Identity verifies token → EmailConfirmed = true → Auto-login with JWT cookies
+```
+
+- `Identity.SignIn.RequireConfirmedEmail = true`
+- Login returns `EmailNotConfirmed` if email is not yet verified
+- Users can request a new token via `POST /api/auth/resend-confirmation { email }`
+- OAuth users are auto-confirmed (`EmailConfirmed = true`) since providers verify emails
+
+---
+
 ## 7. AI Layer — Ollama Integration
 
 ### How It Works
 
-The AI layer uses **Ollama** running locally to provide LLM inference. The `AiService` communicates with it via the OllamaSharp client library.
+The AI layer uses **Ollama** running locally to provide LLM inference, streaming, embeddings, and RAG. The `AiService` communicates via OllamaSharp.
 
 ```
 POST /api/ai/complete  ──►  AiService.GetCompletionAsync()
-POST /api/ai/ask       ──►  AiService.QueryKnowledgeBaseAsync()
+POST /api/ai/stream    ──►  AiService.StreamCompletionAsync()  → SSE stream
+POST /api/ai/ask       ──►  AiService.QueryKnowledgeBaseAsync() → RAG pipeline
+POST /api/ai/embed     ──►  AiService.GetEmbeddingAsync()
+POST /api/ai/ingest    ──►  Chunk text → embed → store in VectorStore
+GET  /api/ai/models    ──►  AiService.ListModelsAsync()
+POST /api/ai/models/switch → AiService.SetModelAsync()
                                      │
                                      ▼ OllamaSharp (HTTP)
                               Ollama server (localhost:11434)
-                              Model: llama3.2:1b
+                              Models: llama3.2:1b + nomic-embed-text
 ```
 
 ### Configuration (`appsettings.json`)
@@ -293,17 +328,55 @@ POST /api/ai/ask       ──►  AiService.QueryKnowledgeBaseAsync()
 ```json
 "Ollama": {
   "BaseUrl": "http://localhost:11434",
-  "Model": "llama3.2:1b"
+  "Model": "llama3.2:1b",
+  "EmbeddingModel": "nomic-embed-text"
 }
 ```
 
-Swap models by changing `Model` and running `ollama pull <model-name>`.
+### Streaming (Server-Sent Events)
+
+`POST /api/ai/stream` returns a `text/event-stream` response. Each token is sent as:
+```
+data: Hello
+data:  world
+data: [DONE]
+```
+
+The frontend can consume this with `EventSource` or `fetch` + `ReadableStream`.
+
+### RAG Pipeline
+
+```
+User asks a question
+       │
+       ▼
+Generate embedding of the question (nomic-embed-text)
+       │
+       ▼
+Search VectorStore for top-3 most similar document chunks (cosine similarity)
+       │
+       ▼
+Build prompt: system instruction + retrieved context + question
+       │
+       ▼
+Send to LLM (llama3.2:1b) → return answer
+```
+
+**Document ingestion** (`POST /api/ai/ingest`):
+1. Text is split into chunks (~500 chars per chunk, split on paragraphs)
+2. Each chunk is embedded using `nomic-embed-text`
+3. Chunk + embedding stored in the in-memory `VectorStore` (singleton)
+
+### Model Management
+
+- `GET /api/ai/models` — Lists all locally available Ollama models
+- `POST /api/ai/models/switch { "model": "llama3.2:3b" }` — Switches the active generation model at runtime. Validates the model exists locally before switching.
 
 ### Key Classes
 
-- **`OllamaSettings`** — Strongly-typed config bound via Options pattern
-- **`AiService`** — Implements `IAiService`, calls Ollama for completions
-- **`QueryKnowledgeBaseAsync`** — RAG-ready: wraps question in a system prompt, ready for vector DB context injection
+- **`OllamaSettings`** — Config: `BaseUrl`, `Model`, `EmbeddingModel`
+- **`VectorStore`** — In-memory concurrent vector store with cosine similarity search
+- **`AiService`** — Full implementation: completions, streaming, embeddings, RAG, model management
 
 ---
 
@@ -314,8 +387,10 @@ Swap models by changing `Model` and running `ollama pull <model-name>`.
 | Method | Route | Rate Limit | Auth | Purpose |
 |---|---|---|---|---|
 | GET | `/api/auth/csrf-token` | global | No | Get CSRF token cookie |
-| POST | `/api/auth/register` | auth | No | Create account |
-| POST | `/api/auth/login` | auth | No | Sign in |
+| POST | `/api/auth/register` | auth | No | Create account + send confirmation email |
+| POST | `/api/auth/confirm-email` | auth | No | Verify email with token |
+| POST | `/api/auth/resend-confirmation` | auth | No | Resend confirmation email |
+| POST | `/api/auth/login` | auth | No | Sign in (requires confirmed email) |
 | POST | `/api/auth/refresh` | auth | No | Refresh expired token |
 | POST | `/api/auth/logout` | global | Yes | Revoke all tokens |
 | GET | `/api/auth/me` | global | Yes | Get current user profile |
@@ -336,9 +411,12 @@ Swap models by changing `Model` and running `ollama pull <model-name>`.
 | Method | Route | Rate Limit | Auth | Purpose |
 |---|---|---|---|---|
 | POST | `/api/ai/complete` | ai (10/60s) | Yes | Free-form LLM completion |
-| POST | `/api/ai/ask` | ai (10/60s) | Yes | Knowledge-base Q&A |
-
-**Request:** `{ "prompt": "Your question" }` — **Response:** `{ "response": "..." }`
+| POST | `/api/ai/stream` | ai (10/60s) | Yes | Streaming completion (SSE) |
+| POST | `/api/ai/ask` | ai (10/60s) | Yes | RAG knowledge-base Q&A |
+| POST | `/api/ai/embed` | ai (10/60s) | Yes | Generate embedding vector |
+| POST | `/api/ai/ingest` | ai (10/60s) | Yes | Ingest document into vector store |
+| GET | `/api/ai/models` | ai (10/60s) | Yes | List available models |
+| POST | `/api/ai/models/switch` | ai (10/60s) | Yes | Switch active model |
 
 ---
 
@@ -434,20 +512,22 @@ SecurePlatform/
 ├── src/
 │   ├── API/                         # ASP.NET Core Web API (entry point)
 │   │   ├── Controllers/
-│   │   │   ├── AuthController.cs
+│   │   │   ├── AuthController.cs    # Auth + email confirmation endpoints
 │   │   │   ├── OAuthController.cs
-│   │   │   └── AiController.cs
+│   │   │   └── AiController.cs      # AI + streaming + RAG + model mgmt
 │   │   ├── Program.cs               # Middleware pipeline & DI
 │   │   └── appsettings.json         # All configuration
 │   │
 │   ├── Application/                 # Contracts & DTOs (no dependencies)
 │   │   ├── Interfaces/
-│   │   │   ├── IAuthService.cs
+│   │   │   ├── IAuthService.cs      # + ConfirmEmailAsync, ResendConfirmationEmailAsync
 │   │   │   ├── ITokenService.cs
 │   │   │   ├── ITokenRevocationService.cs
-│   │   │   ├── IEmailService.cs
-│   │   │   └── IAiService.cs
-│   │   ├── DTOs/Auth/               # Request/Response records
+│   │   │   ├── IEmailService.cs     # + SendEmailConfirmationAsync
+│   │   │   └── IAiService.cs        # + StreamCompletionAsync, ListModelsAsync, SetModelAsync, GetEmbeddingAsync
+│   │   ├── DTOs/Auth/
+│   │   │   ├── ConfirmEmailRequest.cs  # NEW
+│   │   │   └── ...                  # Existing DTOs
 │   │   └── Common/                  # JwtSettings, SmtpSettings
 │   │
 │   ├── Domain/                      # Core entities (zero dependencies)
@@ -461,16 +541,16 @@ SecurePlatform/
 │   │   │   ├── ApplicationDbContext.cs
 │   │   │   └── DbInitializer.cs     # Seeds Admin role + user
 │   │   ├── Services/
-│   │   │   ├── AuthService.cs
+│   │   │   ├── AuthService.cs       # + ConfirmEmailAsync, ResendConfirmation, email check on login
 │   │   │   ├── TokenService.cs
 │   │   │   ├── RedisTokenRevocationService.cs
-│   │   │   ├── SmtpEmailService.cs
-│   │   │   └── DevEmailService.cs
-│   │   └── DependencyInjection.cs
+│   │   │   ├── SmtpEmailService.cs  # + SendEmailConfirmationAsync
+│   │   │   └── DevEmailService.cs   # + SendEmailConfirmationAsync (console)
+│   │   └── DependencyInjection.cs   # + RequireConfirmedEmail = true
 │   │
 │   └── AI/                          # LLM integration
-│       ├── Services/AiService.cs    # Ollama client
-│       └── DependencyInjection.cs
+│       ├── Services/AiService.cs    # Ollama client + streaming + embeddings + RAG + VectorStore
+│       └── DependencyInjection.cs   # + VectorStore singleton
 │
 └── SecurePlatform.sln
 ```
@@ -503,7 +583,8 @@ SecurePlatform/
   },
   "Ollama": {
     "BaseUrl": "http://localhost:11434",
-    "Model": "llama3.2:1b"
+    "Model": "llama3.2:1b",
+    "EmbeddingModel": "nomic-embed-text"
   }
 }
 ```
@@ -519,6 +600,7 @@ redis-server
 # 2. Start Ollama (if not running as a service)
 ollama serve
 ollama pull llama3.2:1b
+ollama pull nomic-embed-text
 
 # 3. Run the .NET API
 dotnet run --project src/API
@@ -551,14 +633,14 @@ npm run dev
 | **OAuth redirect hijack** | `Uri.EscapeDataString` on redirect URIs |
 | **Stale refresh tokens** | Token rotation with chain tracking + revocation on logout |
 | **AI abuse / DoS** | Separate rate limit policy (10 req/60s) on AI endpoints |
+| **Unverified accounts** | Email confirmation required before login |
 
 ---
 
 ## 15. Next Steps
 
-- **RAG Pipeline:** Integrate a vector database (Qdrant, Chroma) to retrieve document chunks for context-aware AI answers
-- **Streaming AI:** Expose OllamaSharp streaming via Server-Sent Events or SignalR
-- **Model Switching:** Runtime model selection endpoint
-- **Embeddings:** Use `nomic-embed-text` for vector search
-- **Email Confirmation:** Require email verification on registration
+- **Persistent Vector Store:** Replace in-memory `VectorStore` with Qdrant or ChromaDB for production-scale RAG
 - **2FA / MFA:** Add TOTP-based two-factor authentication
+- **SignalR Streaming:** Real-time token-by-token AI responses via WebSocket
+- **Admin Dashboard:** Model management UI, user management, analytics
+- **Document Upload:** File upload endpoint for PDF/Word ingestion into RAG pipeline

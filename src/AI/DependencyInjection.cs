@@ -10,6 +10,7 @@ public static class DependencyInjection
     public static IServiceCollection AddAiServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<OllamaSettings>(configuration.GetSection(OllamaSettings.SectionName));
+        services.AddSingleton<VectorStore>();
         services.AddScoped<IAiService, AiService>();
         return services;
     }

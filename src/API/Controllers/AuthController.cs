@@ -96,16 +96,44 @@ public class AuthController : ControllerBase
 
         var result = await _authService.RegisterAsync(request);
         if (!result.Succeeded)
+            return Ok(result); // 200 with EmailNotConfirmed — tells client to show confirmation page
+
+        SetAuthCookies(result.AccessToken!, result.RefreshToken!, result.ExpiresAt!.Value);
+        return Ok(AuthResponseWithoutTokens(result));
+    }
+
+    /// <summary>
+    /// Confirm email with the token sent to the user's inbox.
+    /// POST /api/auth/confirm-email
+    /// </summary>
+    [HttpPost("confirm-email")]
+    [EnableRateLimiting("auth")]
+    public async Task<IActionResult> ConfirmEmail([FromBody] ConfirmEmailRequest request)
+    {
+        try { await _antiforgery.ValidateRequestAsync(HttpContext); }
+        catch { return BadRequest(new { message = "Invalid CSRF token." }); }
+
+        var result = await _authService.ConfirmEmailAsync(request.Email, request.Token);
+        if (!result.Succeeded)
             return BadRequest(result);
 
-        // ═══════════════════════════════════════════════════════
-        // [SECURITY: HTTP-ONLY COOKIES] — Store JWT tokens in
-        // HTTP-only, Secure, SameSite=Strict cookies. JavaScript
-        // cannot access them, eliminating XSS token theft.
-        // ═══════════════════════════════════════════════════════
         SetAuthCookies(result.AccessToken!, result.RefreshToken!, result.ExpiresAt!.Value);
-
         return Ok(AuthResponseWithoutTokens(result));
+    }
+
+    /// <summary>
+    /// Resend the email confirmation token.
+    /// POST /api/auth/resend-confirmation
+    /// </summary>
+    [HttpPost("resend-confirmation")]
+    [EnableRateLimiting("auth")]
+    public async Task<IActionResult> ResendConfirmation([FromBody] ForgotPasswordRequest request)
+    {
+        try { await _antiforgery.ValidateRequestAsync(HttpContext); }
+        catch { return BadRequest(new { message = "Invalid CSRF token." }); }
+
+        var result = await _authService.ResendConfirmationEmailAsync(request.Email);
+        return Ok(result);
     }
 
     /// <summary>

@@ -47,6 +47,7 @@ public static class DependencyInjection
             options.Password.RequireLowercase = true;
 
             options.User.RequireUniqueEmail = true;
+            options.SignIn.RequireConfirmedEmail = true;
         })
         .AddEntityFrameworkStores<ApplicationDbContext>()
         .AddDefaultTokenProviders();

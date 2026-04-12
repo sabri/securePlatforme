@@ -78,8 +78,12 @@ public class AuthService : IAuthService
         // 3. Assign default role
         await _userManager.AddToRoleAsync(user, "User");
 
-        // 4. Generate tokens and return
-        return await GenerateAuthResponseAsync(user);
+        // 4. Send email confirmation
+        var confirmToken = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+        await _emailService.SendEmailConfirmationAsync(user.Email!, confirmToken);
+
+        return AuthResponse.Failure(AuthResultType.EmailNotConfirmed,
+            "Registration successful. Please check your email to confirm your account.");
     }
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
@@ -91,6 +95,10 @@ public class AuthService : IAuthService
 
         if (!user.IsActive)
             return AuthResponse.Failure(AuthResultType.UserLocked, "Account is deactivated.");
+
+        // Check email confirmation
+        if (!user.EmailConfirmed)
+            return AuthResponse.Failure(AuthResultType.EmailNotConfirmed, "Please confirm your email before logging in.");
 
         // 2. Verify password
         var isPasswordValid = await _userManager.CheckPasswordAsync(user, request.Password);
@@ -224,6 +232,51 @@ public class AuthService : IAuthService
 
         return AuthResponse.Failure(AuthResultType.PasswordResetSuccess,
             "Password has been reset successfully. You can now login.");
+    }
+
+    // ═══════════════════════════════════════════════
+    // Email Confirmation
+    // ═══════════════════════════════════════════════
+
+    public async Task<AuthResponse> ConfirmEmailAsync(string email, string token)
+    {
+        var user = await _userManager.FindByEmailAsync(email);
+        if (user == null)
+            return AuthResponse.Failure(AuthResultType.UserNotFound, "Invalid confirmation request.");
+
+        if (user.EmailConfirmed)
+            return AuthResponse.Success(string.Empty, string.Empty, DateTime.UtcNow,
+                MapToUserDto(user, await _userManager.GetRolesAsync(user)));
+
+        var result = await _userManager.ConfirmEmailAsync(user, token);
+        if (!result.Succeeded)
+        {
+            var errors = string.Join("; ", result.Errors.Select(e => e.Description));
+            return AuthResponse.Failure(AuthResultType.TokenInvalid, errors);
+        }
+
+        // Auto-login after confirmation
+        return await GenerateAuthResponseAsync(user);
+    }
+
+    public async Task<AuthResponse> ResendConfirmationEmailAsync(string email)
+    {
+        var user = await _userManager.FindByEmailAsync(email);
+        if (user == null)
+        {
+            // Don't reveal whether the email exists
+            return AuthResponse.Failure(AuthResultType.EmailNotConfirmed,
+                "If that email is registered, a confirmation email has been sent.");
+        }
+
+        if (user.EmailConfirmed)
+            return AuthResponse.Failure(AuthResultType.EmailNotConfirmed, "Email is already confirmed.");
+
+        var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+        await _emailService.SendEmailConfirmationAsync(user.Email!, token);
+
+        return AuthResponse.Failure(AuthResultType.EmailNotConfirmed,
+            "If that email is registered, a confirmation email has been sent.");
     }
 
     // ═══════════════════════════════════════════════
